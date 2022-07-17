@@ -28,7 +28,7 @@ class MoshiPayloadAdapter(moshi: Moshi) : Session.PayloadAdapter {
     /**
      * Convert FROM request bytes
      */
-    private fun String.toMethodCall(): Session.MethodCall =
+    internal fun String.toMethodCall(): Session.MethodCall =
             mapAdapter.fromJson(this)?.let {
                 try {
                     val method = it["method"]
