@@ -1,6 +1,7 @@
 package org.walletconnect.impls
 
 import com.squareup.moshi.Json
+import com.squareup.moshi.JsonClass
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.Types
 import org.bouncycastle.crypto.digests.SHA256Digest
@@ -223,7 +224,7 @@ class MoshiPayloadAdapter(moshi: Moshi) : Session.PayloadAdapter {
             "params" to params
         )
 
-    // TODO: @JsonClass(generateAdapter = true)
+    @JsonClass(generateAdapter = true)
     data class EncryptedPayload(
         @Json(name = "data") val data: String,
         @Json(name = "iv") val iv: String,
