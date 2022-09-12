@@ -1,0 +1,68 @@
+name: Build
+
+on:
+  pull_request:
+    paths-ignore:
+      - '**.*ignore'
+      - '**.md'
+      - '**.txt'
+  push:
+    paths-ignore:
+      - '**.*ignore'
+      - '**.md'
+      - '**.txt'
+
+env:
+  CI: true
+  GRADLE_BUILD_ACTION_CACHE_DEBUG_ENABLED: true
+  GRADLE_OPTS: >
+    -Dorg.gradle.jvmargs=-Xmx3g
+    -Dorg.gradle.daemon=false
+    -Dkotlin.incremental=false
+    -Dorg.gradle.configureondemand=false
+    -Dorg.gradle.unsafe.configuration-cache=false
+    -Dorg.gradle.vfs.watch=false
+
+jobs:
+  build-and-check:
+    strategy:
+      fail-fast: false
+      matrix:
+        java: [ '11' ]
+        os: [ 'ubuntu-latest' ]
+
+    name: 'Test on ${{ matrix.os }} JDK ${{ matrix.java }}'
+    runs-on: ${{ matrix.os }}
+    if: ${{ !contains(github.event.head_commit.message, 'ci skip') }}
+
+    steps:
+      - name: Harden Runner
+        if: matrix.os == 'ubuntu-latest'
+        uses: step-security/harden-runner@f8b229487278099721572481264761b1d4fdd530
+        with:
+          disable-sudo: true
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: 'Set up JDK ${{ matrix.java }}'
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'temurin'
+          java-version: '${{ matrix.java }}'
+
+      - name: Setup Android
+        uses: android-actions/setup-android@v2
+
+      - name: 'Build and check on ${{ matrix.os }}'
+        uses: gradle/gradle-build-action@v2
+        with:
+          arguments: build assemble check --stacktrace --continue --scan
+
+      - name: Publish JUnit test results as a pull request check
+        if: github.ref == 'refs/heads/main'
+        uses: mikepenz/action-junit-report@v3
+        continue-on-error: true
+        with:
+          report_paths: '**/build/test-results/*/TEST-*.xml'
