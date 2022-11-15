@@ -85,9 +85,9 @@ interface Session {
     }
 
     sealed class Status {
-        object Connected : Status()
+        data class Connected(val clientId: String) : Status()
         object Disconnected : Status()
-        object Approved : Status()
+        data class Approved(val clientId: String) : Status()
         object Updated : Status()
         object Closed : Status()
         data class Error(val throwable: Throwable) : Status()
