@@ -20,10 +20,10 @@ class MainActivity : ComponentActivity(), Session.Callback {
 
     override fun onStatus(status: Session.Status) {
         when (status) {
-            Session.Status.Approved -> sessionApproved()
+            is Session.Status.Approved -> sessionApproved()
             Session.Status.Closed -> sessionClosed()
-            Session.Status.Connected,
-            Session.Status.Disconnected,
+            is Session.Status.Connected,
+            is Session.Status.Disconnected,
             is Session.Status.Error -> {
                 // Do Stuff
             }

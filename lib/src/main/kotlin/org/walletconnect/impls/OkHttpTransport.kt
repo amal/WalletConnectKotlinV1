@@ -4,8 +4,6 @@ import com.squareup.moshi.Moshi
 import com.squareup.moshi.Types
 import okhttp3.*
 import org.walletconnect.Session
-import org.walletconnect.Session.Transport.Status.*
-import java.lang.Exception
 import java.util.*
 import java.util.concurrent.ConcurrentLinkedQueue
 
@@ -72,14 +70,14 @@ class OkHttpTransport(
         )
 
     override fun close() {
-        socket?.close(1000, null)
+        tryExec { socket?.close(1000, null) }
     }
 
     override fun onOpen(webSocket: WebSocket, response: Response) {
         super.onOpen(webSocket, response)
         connected = true
         drainQueue()
-        statusHandler(Connected)
+        statusHandler(Session.Transport.Status.Connected)
     }
 
     override fun onMessage(webSocket: WebSocket, text: String) {
@@ -98,27 +96,24 @@ class OkHttpTransport(
 
     override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
         super.onFailure(webSocket, t, response)
-        statusHandler(Error(t))
-        disconnected()
+        socket = null
+        connected = false
+        statusHandler(Session.Transport.Status.ConnectionFailed(t, response?.code))
     }
 
     override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
         super.onClosed(webSocket, code, reason)
-        disconnected()
-    }
-
-    private fun disconnected() {
         socket = null
         connected = false
-        statusHandler(Disconnected)
+        statusHandler(Session.Transport.Status.ConnectionClosed(Throwable(reason), code))
     }
 
     private fun tryExec(block: () -> Unit): Boolean {
         return try {
             block()
             true
-        } catch (e: Exception) {
-            statusHandler(Error(e))
+        } catch (@Suppress("TooGenericExceptionCaught") e: Throwable) {
+            statusHandler(Session.Transport.Status.Error(e))
             false
         }
     }

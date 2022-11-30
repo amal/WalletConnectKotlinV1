@@ -42,7 +42,7 @@ class WCSession(
     // Non-persisted state
     private val transport = transportBuilder.build(config.bridge, ::handleStatus, ::handleMessage)
     private val requests: MutableMap<Long, (Session.MethodCall.Response) -> Unit> = ConcurrentHashMap()
-    private val sessionCallbacks: MutableSet<Session.Callback> = Collections.newSetFromMap(ConcurrentHashMap<Session.Callback, Boolean>())
+    private val sessionCallbacks: MutableSet<Session.Callback> = Collections.newSetFromMap(ConcurrentHashMap())
 
     init {
         currentKey = config.key
@@ -74,10 +74,15 @@ class WCSession(
         sessionCallbacks.clear()
     }
 
+    override fun disconnect() {
+        internalClose()
+    }
+
     private fun propagateToCallbacks(action: Session.Callback.() -> Unit) {
         sessionCallbacks.forEach {
-            try { it.action() }
-            catch (t: Throwable) {
+            try {
+                it.action()
+            } catch (t: Throwable) {
                 // If error propagation fails, don't try again
                 nullOnThrow { it.onStatus(Session.Status.Error(t)) }
             }
@@ -104,22 +109,23 @@ class WCSession(
     override fun offer() {
         if (transport.connect()) {
             val requestId = createCallId()
-            send(Session.MethodCall.SessionRequest(requestId, clientData, chainId), topic = config.handshakeTopic, callback = { resp ->
+            val sessionRequest = Session.MethodCall.SessionRequest(requestId, clientData, chainId)
+            send(sessionRequest, topic = config.handshakeTopic) { resp ->
                 (resp.result as? Map<String, *>)?.extractSessionParams()?.let { params ->
                     peerId = params.peerData?.id
                     peerMeta = params.peerData?.meta
                     updateSession(params)
                     propagateToCallbacks {
                         onStatus(
-                            if (params.approved){
+                            if (params.approved) {
                                 Session.Status.Approved(clientData.id)
-                            } else{
+                            } else {
                                 Session.Status.Closed
                             }
                         )
                     }
                 }
-            })
+            }
             handshakeId = requestId
         }
     }
@@ -161,11 +167,11 @@ class WCSession(
 
     override fun rejectRequest(id: Long, errorCode: Long, errorMsg: String) {
         send(
-                Session.MethodCall.Response(
-                        id,
-                        result = null,
-                        error = Session.Error(errorCode, errorMsg)
-                )
+            Session.MethodCall.Response(
+                id,
+                result = null,
+                error = Session.Error(errorCode, errorMsg)
+            )
         )
     }
 
@@ -183,19 +189,30 @@ class WCSession(
                 transport.send(message)
                 messageLogger?.log(message, isOwnMessage = true)
             }
-            Session.Transport.Status.Disconnected -> {
-                // no-op
-            }
-            is Session.Transport.Status.Error -> {
+
+            is Session.Transport.Status.ConnectionClosed,
+            is Session.Transport.Status.ConnectionFailed,
+            is Session.Transport.Status.Error,
+            -> {
                 // no-op
             }
         }
         propagateToCallbacks {
-            onStatus(when(status) {
-                Session.Transport.Status.Connected -> Session.Status.Connected(clientData.id)
-                Session.Transport.Status.Disconnected -> Session.Status.Disconnected
-                is Session.Transport.Status.Error -> Session.Status.Error(Session.TransportError(status.throwable))
-            })
+            onStatus(
+                when (status) {
+                    Session.Transport.Status.Connected -> Session.Status.Connected(clientData.id)
+                    is Session.Transport.Status.Error -> Session.Status.Error(Session.TransportError(status.throwable))
+                    is Session.Transport.Status.ConnectionClosed -> Session.Status.Disconnected(
+                        status.cause,
+                        status.code
+                    )
+
+                    is Session.Transport.Status.ConnectionFailed -> Session.Status.ConnectionFailed(
+                        status.cause,
+                        status.code
+                    )
+                }
+            )
         }
     }
 
@@ -221,6 +238,7 @@ class WCSession(
                 chainId = data.chainId
                 storeSession()
             }
+
             is Session.MethodCall.SessionUpdate -> {
                 if (!data.params.approved) {
                     endSession()
@@ -231,16 +249,20 @@ class WCSession(
                     }
                 }
             }
+
             is Session.MethodCall.SendTransaction -> {
                 accountToCheck = data.from
             }
+
             is Session.MethodCall.SignMessage -> {
                 accountToCheck = data.address
             }
+
             is Session.MethodCall.Response -> {
                 val callback = requests[data.id] ?: return
                 callback(data)
             }
+
             is Session.MethodCall.Custom -> {
                 // no-op
             }
@@ -276,24 +298,24 @@ class WCSession(
 
     private fun storeSession() {
         sessionStore.store(
-                config.handshakeTopic,
-                WCSessionStore.State(
-                        config,
-                        clientData,
-                        peerId?.let { Session.PeerData(it, peerMeta) },
-                        handshakeId,
-                        currentKey,
-                        approvedAccounts,
-                        chainId
-                )
+            config.handshakeTopic,
+            WCSessionStore.State(
+                config,
+                clientData,
+                peerId?.let { Session.PeerData(it, peerMeta) },
+                handshakeId,
+                currentKey,
+                approvedAccounts,
+                chainId
+            )
         )
     }
 
     // Returns true if method call was handed over to transport
     private fun send(
-            msg: Session.MethodCall,
-            topic: String? = peerId,
-            callback: ((Session.MethodCall.Response) -> Unit)? = null
+        msg: Session.MethodCall,
+        topic: String? = peerId,
+        callback: ((Session.MethodCall.Response) -> Unit)? = null
     ): Boolean {
         topic ?: return false
 
@@ -319,8 +341,7 @@ class WCSession(
     }
 
     override fun kill() {
-        val params = Session.SessionParams(false, null, null, null)
-        send(Session.MethodCall.SessionUpdate(createCallId(), params))
+        propagateToCallbacks { onStatus(Session.Status.Killed(sessionId = clientData.id, cause = null)) }
         endSession()
     }
 }
@@ -336,12 +357,12 @@ interface WCSessionStore {
 
     @JsonClass(generateAdapter = true)
     data class State(
-            val config: Session.FullyQualifiedConfig,
-            val clientData: Session.PeerData,
-            val peerData: Session.PeerData?,
-            val handshakeId: Long?,
-            val currentKey: String,
-            val approvedAccounts: List<String>?,
-            val chainId: Long?
+        val config: Session.FullyQualifiedConfig,
+        val clientData: Session.PeerData,
+        val peerData: Session.PeerData?,
+        val handshakeId: Long?,
+        val currentKey: String,
+        val approvedAccounts: List<String>?,
+        val chainId: Long?
     )
 }

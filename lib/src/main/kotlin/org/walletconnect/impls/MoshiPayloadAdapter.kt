@@ -1,7 +1,5 @@
 package org.walletconnect.impls
 
-import com.squareup.moshi.Json
-import com.squareup.moshi.JsonClass
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.Types
 import org.walletconnect.Session
@@ -17,8 +15,8 @@ class MoshiPayloadAdapter(moshi: Moshi) : Session.PayloadAdapter {
         )
     )
 
-    override fun parse(decryptedPayloadJson: String): Session.MethodCall {
-        return decryptedPayloadJson.toMethodCall()
+    override fun parse(decryptedPayload: String): Session.MethodCall {
+        return decryptedPayload.toMethodCall()
     }
 
     override fun prepare(data: Session.MethodCall): String {
@@ -29,21 +27,21 @@ class MoshiPayloadAdapter(moshi: Moshi) : Session.PayloadAdapter {
      * Convert FROM request bytes
      */
     internal fun String.toMethodCall(): Session.MethodCall =
-            mapAdapter.fromJson(this)?.let {
-                try {
-                    val method = it["method"]
-                    when (method) {
-                        "wc_sessionRequest" -> it.toSessionRequest()
-                        "wc_sessionUpdate" -> it.toSessionUpdate()
-                        "eth_sendTransaction" -> it.toSendTransaction()
-                        "eth_sign" -> it.toSignMessage()
-                        null -> it.toResponse()
-                        else -> it.toCustom()
-                    }
-                } catch (e: Exception) {
-                    throw Session.MethodCallException.InvalidRequest(it.getId(), "$this (${e.message ?: "Unknown error"})")
+        mapAdapter.fromJson(this)?.let {
+            try {
+                val method = it["method"]
+                when (method) {
+                    "wc_sessionRequest" -> it.toSessionRequest()
+                    "wc_sessionUpdate" -> it.toSessionUpdate()
+                    "eth_sendTransaction" -> it.toSendTransaction()
+                    "eth_sign" -> it.toSignMessage()
+                    null -> it.toResponse()
+                    else -> it.toCustom()
                 }
-            } ?: throw IllegalArgumentException("Invalid json")
+            } catch (e: Exception) {
+                throw Session.MethodCallException.InvalidRequest(it.getId(), "$this (${e.message ?: "Unknown error"})")
+            }
+        } ?: throw IllegalArgumentException("Invalid json")
 
     private fun Map<String, *>.toSessionUpdate(): Session.MethodCall.SessionUpdate {
         val params = this["params"] as? List<*> ?: throw IllegalArgumentException("params missing")
