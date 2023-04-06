@@ -1,23 +1,13 @@
-# kotlin-walletconnect-lib
-[![](https://jitpack.io/v/WalletConnect/kotlin-walletconnect-lib.svg)](https://jitpack.io/#WalletConnect/kotlin-walletconnect-lib)
+# WalletConnectKotlinV1
 
-library to use WalletConnect with Kotlin or Java
+Library to use WalletConnect with Kotlin or Java.
 
-## Add this library to your project
+## WARNING
 
-Add the @jitpack repository to your gradle file:
+**WalletConnect v1 is deprecated!**
 
-```gradle
-repositories {
-	...
-	maven { url 'https://jitpack.io' }
-}
-```
+**Shutdown scheduled for June 28, 2023**
 
-Add the dependency:
-
-```gradle
-dependencies {
-	implementation 'com.github.WalletConnect:kotlin-walletconnect-lib:version'
-}
-```
+For details read:
+- https://medium.com/walletconnect/walletconnect-v1-0-sunset-notice-and-migration-schedule-8af9d3720d2e
+- https://medium.com/walletconnect/weve-reset-the-clock-on-the-walletconnect-v1-0-shutdown-now-scheduled-for-june-28-2023-ead2d953b595
