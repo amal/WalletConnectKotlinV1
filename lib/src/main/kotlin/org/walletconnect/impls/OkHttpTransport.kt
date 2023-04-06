@@ -121,12 +121,12 @@ class OkHttpTransport(
         }
     }
 
-    class Builder(val client: OkHttpClient, val moshi: Moshi) :
+    class Builder(private val client: OkHttpClient, private val moshi: Moshi) :
         Session.Transport.Builder {
         override fun build(
             url: String,
             statusHandler: (Session.Transport.Status) -> Unit,
-            messageHandler: (Session.Transport.Message) -> Unit
+            messageHandler: (Session.Transport.Message) -> Unit,
         ): Session.Transport =
             OkHttpTransport(client, url, statusHandler, messageHandler, moshi)
 

@@ -1,5 +1,6 @@
 package org.walletconnect.impls
 
+import com.squareup.moshi.JsonClass
 import org.walletconnect.Session
 import org.walletconnect.nullOnThrow
 import org.walletconnect.types.extractSessionParams
@@ -8,12 +9,14 @@ import java.util.*
 import java.util.concurrent.ConcurrentHashMap
 
 class WCSession(
-        private val config: Session.FullyQualifiedConfig,
-        private val payloadAdapter: Session.PayloadAdapter,
-        private val sessionStore: WCSessionStore,
-        transportBuilder: Session.Transport.Builder,
-        clientMeta: Session.PeerMeta,
-        clientId: String? = null
+    private val config: Session.FullyQualifiedConfig,
+    private val payloadAdapter: Session.PayloadAdapter,
+    private val payloadEncryption: Session.PayloadEncryption,
+    private val sessionStore: WCSessionStore,
+    private val messageLogger: Session.MessageLogger? = null,
+    transportBuilder: Session.Transport.Builder,
+    clientMeta: Session.PeerMeta,
+    clientId: String? = null
 ) : Session {
 
     private val keyLock = Any()
@@ -85,14 +88,16 @@ class WCSession(
 
     override fun approvedAccounts(): List<String>? = approvedAccounts
 
+    override fun chainId(): Long? = chainId
+
     override fun init() {
         if (transport.connect()) {
             // Register for all messages for this client
-            transport.send(
-                    Session.Transport.Message(
-                            config.handshakeTopic, "sub", ""
-                    )
+            val message = Session.Transport.Message(
+                config.handshakeTopic, "sub", ""
             )
+            transport.send(message)
+            messageLogger?.log(message, isOwnMessage = true)
         }
     }
 
@@ -103,14 +108,18 @@ class WCSession(
                 (resp.result as? Map<String, *>)?.extractSessionParams()?.let { params ->
                     peerId = params.peerData?.id
                     peerMeta = params.peerData?.meta
-                    approvedAccounts = params.accounts
-                    chainId = params.chainId
-                    storeSession()
+                    updateSession(params)
                     propagateToCallbacks { onStatus(if (params.approved) Session.Status.Approved else Session.Status.Closed) }
                 }
             })
             handshakeId = requestId
         }
+    }
+
+    private fun updateSession(params: Session.SessionParams) {
+        approvedAccounts = params.accounts
+        chainId = params.chainId
+        storeSession()
     }
 
     override fun approve(accounts: List<String>, chainId: Long) {
@@ -160,11 +169,17 @@ class WCSession(
         when (status) {
             Session.Transport.Status.Connected -> {
                 // Register for all messages for this client
-                transport.send(
-                    Session.Transport.Message(
-                        clientData.id, "sub", ""
-                    )
+                val message = Session.Transport.Message(
+                    clientData.id, "sub", ""
                 )
+                transport.send(message)
+                messageLogger?.log(message, isOwnMessage = true)
+            }
+            Session.Transport.Status.Disconnected -> {
+                // no-op
+            }
+            is Session.Transport.Status.Error -> {
+                // no-op
             }
         }
         propagateToCallbacks {
@@ -181,7 +196,9 @@ class WCSession(
         val data: Session.MethodCall
         synchronized(keyLock) {
             try {
-                data = payloadAdapter.parse(message.payload, decryptionKey)
+                val decryptedPayload = payloadEncryption.decrypt(message.payload, decryptionKey)
+                data = payloadAdapter.parse(decryptedPayload)
+                messageLogger?.log(message.copy(payload = decryptedPayload), isOwnMessage = false)
             } catch (e: Exception) {
                 handlePayloadError(e)
                 return
@@ -198,8 +215,12 @@ class WCSession(
             is Session.MethodCall.SessionUpdate -> {
                 if (!data.params.approved) {
                     endSession()
+                } else {
+                    updateSession(data.params)
+                    propagateToCallbacks {
+                        onStatus(Session.Status.Updated)
+                    }
                 }
-                // TODO handle session update -> not important for our usecase
             }
             is Session.MethodCall.SendTransaction -> {
                 accountToCheck = data.from
@@ -210,6 +231,9 @@ class WCSession(
             is Session.MethodCall.Response -> {
                 val callback = requests[data.id] ?: return
                 callback(data)
+            }
+            is Session.MethodCall.Custom -> {
+                // no-op
             }
         }
 
@@ -265,13 +289,17 @@ class WCSession(
         topic ?: return false
 
         val payload: String
+        val unencryptedPayload: String
         synchronized(keyLock) {
-            payload = payloadAdapter.prepare(msg, encryptionKey)
+            unencryptedPayload = payloadAdapter.prepare(msg)
+            payload = payloadEncryption.encrypt(unencryptedPayload, encryptionKey)
         }
         callback?.let {
             requests[msg.id()] = callback
         }
-        transport.send(Session.Transport.Message(topic, "pub", payload))
+        val message = Session.Transport.Message(topic, "pub", payload)
+        transport.send(message)
+        messageLogger?.log(message.copy(payload = unencryptedPayload), isOwnMessage = true)
         return true
     }
 
@@ -297,6 +325,7 @@ interface WCSessionStore {
 
     fun list(): List<State>
 
+    @JsonClass(generateAdapter = true)
     data class State(
             val config: Session.FullyQualifiedConfig,
             val clientData: Session.PeerData,

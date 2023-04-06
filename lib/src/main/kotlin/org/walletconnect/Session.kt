@@ -1,5 +1,6 @@
 package org.walletconnect
 
+import com.squareup.moshi.JsonClass
 import java.net.URLDecoder
 import java.net.URLEncoder
 
@@ -17,6 +18,7 @@ interface Session {
 
     fun peerMeta(): PeerMeta?
     fun approvedAccounts(): List<String>?
+    fun chainId(): Long?
 
     fun approveRequest(id: Long, response: Any)
     fun rejectRequest(id: Long, errorCode: Long, errorMsg: String)
@@ -26,6 +28,7 @@ interface Session {
     fun removeCallback(cb: Callback)
     fun clearCallbacks()
 
+    @JsonClass(generateAdapter = true)
     data class FullyQualifiedConfig(
             val handshakeTopic: String,
             val bridge: String,
@@ -70,6 +73,10 @@ interface Session {
         }
     }
 
+    interface MessageLogger {
+        fun log(message: Session.Transport.Message, isOwnMessage: Boolean)
+    }
+
     interface Callback {
         fun onStatus(status: Status)
         fun onMethodCall(call: MethodCall)
@@ -79,6 +86,7 @@ interface Session {
         object Connected : Status()
         object Disconnected : Status()
         object Approved : Status()
+        object Updated : Status()
         object Closed : Status()
         data class Error(val throwable: Throwable) : Status()
     }
@@ -86,9 +94,21 @@ interface Session {
     data class TransportError(override val cause: Throwable) : RuntimeException("Transport exception caused by $cause", cause)
 
     interface PayloadAdapter {
-        fun parse(payload: String, key: String): MethodCall
-        fun prepare(data: MethodCall, key: String): String
+        /**
+         * Takes in the decrypted payload JSON and returns the parsed [MethodCall].
+         */
+        fun parse(decryptedPayload: String): MethodCall
 
+        /**
+         * Takes in a [MethodCall] and returns the unencrypted payload JSON.
+         */
+        fun prepare(data: MethodCall): String
+
+    }
+
+    interface PayloadEncryption {
+        fun encrypt(unencryptedPayloadJson: String, key: String): String
+        fun decrypt(encryptedPayloadJson: String, key: String): String
     }
 
     interface Transport {
@@ -117,7 +137,7 @@ interface Session {
             fun build(
                     url: String,
                     statusHandler: (Status) -> Unit,
-                    messageHandler: (Message) -> Unit
+                    messageHandler: (Message) -> Unit,
             ): Transport
         }
 
@@ -154,7 +174,10 @@ interface Session {
         data class Response(val id: Long, val result: Any?, val error: Error? = null) : MethodCall(id)
     }
 
+    @JsonClass(generateAdapter = true)
     data class PeerData(val id: String, val meta: PeerMeta?)
+
+    @JsonClass(generateAdapter = true)
     data class PeerMeta(
             val url: String? = null,
             val name: String? = null,
