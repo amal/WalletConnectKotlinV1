@@ -1,0 +1,12 @@
+# Configuration file for jitpack.io
+
+# Specify JDK version
+# https://jitpack.io/docs/BUILDING/#java-version
+jdk:
+  - openjdk11
+
+before_install:
+  - yes | sdkmanager --licenses
+
+install:
+    - ./gradlew lib:publishToMavenLocal
