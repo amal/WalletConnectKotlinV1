@@ -1,6 +1,6 @@
 package io.walletconnect.example
 
-import androidx.multidex.MultiDexApplication
+import android.app.Application
 import com.squareup.moshi.Moshi
 import io.walletconnect.example.server.BridgeServer
 import okhttp3.OkHttpClient
@@ -11,7 +11,7 @@ import org.walletconnect.nullOnThrow
 import java.io.File
 import java.util.*
 
-class ExampleApplication : MultiDexApplication() {
+class ExampleApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         initMoshi()
@@ -49,12 +49,18 @@ class ExampleApplication : MultiDexApplication() {
         fun resetSession() {
             nullOnThrow { session }?.clearCallbacks()
             val key = ByteArray(32).also { Random().nextBytes(it) }.toNoPrefixHexString()
-            config = Session.FullyQualifiedConfig(UUID.randomUUID().toString(), "http://localhost:${BridgeServer.PORT}", key)
-            session = WCSession(config,
-                    MoshiPayloadAdapter(moshi),
-                    storage,
-                    OkHttpTransport.Builder(client, moshi),
-                    Session.PeerMeta(name = "Example App")
+            config = Session.FullyQualifiedConfig(
+                handshakeTopic = UUID.randomUUID().toString(),
+                bridge = "http://localhost:${BridgeServer.PORT}",
+                key = key,
+            )
+            session = WCSession(
+                config = config,
+                payloadAdapter = MoshiPayloadAdapter(moshi),
+                payloadEncryption = MoshiPayloadEncryption(moshi),
+                sessionStore = storage,
+                transportBuilder = OkHttpTransport.Builder(client, moshi),
+                clientMeta = Session.PeerMeta(name = "Example App"),
             )
             session.offer()
         }
